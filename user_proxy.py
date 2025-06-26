@@ -19,7 +19,7 @@ class BinanceUserProxy:
             symbol (str): Trading pair (e.g., BTCUSDT).
             interval (str): Time interval (e.g., 1h).
             limit (int): Number of data points.
-            chart_type (str): Type of chart (candlestick or line).
+            chart_type (str): Type of chart (candlestick, line, combined).
         """
         # Configure Binance agent
         self.binance_agent.set_symbol(symbol)
@@ -33,8 +33,10 @@ class BinanceUserProxy:
             fig = self.chart_agent.plot_candlestick(data, symbol, save=True)
         elif chart_type.lower() == "line":
             fig = self.chart_agent.plot_line(data, symbol, save=True)
+        elif chart_type.lower() == "combined":
+            fig = self.chart_agent.plot_combined_charts(data, symbol, save=True)
         else:
-            raise ValueError("Unsupported chart type. Use 'candlestick' or 'line'.")
+            raise ValueError("Unsupported chart type. Use 'candlestick', 'line', or 'combined'.")
 
-        # Display chart (for Jupyter or interactive environments)
+        # Display chart
         fig.show()

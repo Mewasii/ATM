@@ -6,7 +6,7 @@ def main():
         symbol="BTCUSDT",
         interval="1h",
         limit=100,
-        chart_type="candlestick"
+        chart_type="combined"
     )
 
 if __name__ == "__main__":
