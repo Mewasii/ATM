@@ -2,33 +2,23 @@ import plotly.graph_objects as go
 import plotly.subplots as sp
 import pandas as pd
 from datetime import datetime
+
 from utils.data_processor import calculate_heikin_ashi
-from agents.indicator_agent import IndicatorAgent  # Đảm bảo bạn có file này
+from agents.indicator_agent import IndicatorAgent
+from agents.strategy_agent import StrategyAgent  # Đảm bảo bạn có file này
 
 class ChartAgent:
     def __init__(self):
         self.output_dir = "data/processed"
 
-    def plot_combined_charts(self, df, symbol="BTCUSDT", indicators=None, save=False):
+    def plot_combined_charts(self, df, symbol="BTCUSDT", indicators=None, strategy=None, save=False):
         """
         Plot standard candlestick and Heikin Ashi charts in subplots.
-        Args:
-            df (pandas.DataFrame): DataFrame with columns [open_time, open, high, low, close].
-            symbol (str): Trading pair symbol.
-            indicators (list): List of indicators to calculate (e.g., ["sma", "rsi"]).
-            save (bool): If True, save the chart as HTML.
-        Returns:
-            plotly.graph_objects.Figure: The combined chart.
         """
-
-        # Tính Heikin Ashi
         ha_df = calculate_heikin_ashi(df)
-
-        # Kiểm tra xem có vẽ RSI hay không để xác định số subplot
         show_rsi = indicators and "rsi" in indicators
         total_rows = 3 if show_rsi else 2
 
-        # Tạo subplots
         fig = sp.make_subplots(
             rows=total_rows,
             cols=1,
@@ -42,7 +32,7 @@ class ChartAgent:
             row_heights=[0.4, 0.4, 0.2] if show_rsi else [0.5, 0.5]
         )
 
-        # Candlestick
+        # Candlestick chart
         fig.add_trace(
             go.Candlestick(
                 x=df['open_time'],
@@ -55,7 +45,7 @@ class ChartAgent:
             row=1, col=1
         )
 
-        # Heikin Ashi
+        # Heikin Ashi chart
         fig.add_trace(
             go.Candlestick(
                 x=ha_df['open_time'],
@@ -70,7 +60,62 @@ class ChartAgent:
             row=2, col=1
         )
 
-        # Chỉ báo kỹ thuật
+        # Strategy
+        if strategy:
+            strategy_agent = StrategyAgent(df)
+
+            if strategy.lower() == "ema_crossover":
+                df = strategy_agent.ema_crossover_strategy(fast_length=9, slow_length=21)
+
+                # Fast EMA
+                fig.add_trace(
+                    go.Scatter(
+                        x=df['open_time'],
+                        y=df['fast_ema'],
+                        name="Fast EMA",
+                        line=dict(color='orange')
+                    ),
+                    row=1, col=1
+                )
+
+                # Slow EMA
+                fig.add_trace(
+                    go.Scatter(
+                        x=df['open_time'],
+                        y=df['slow_ema'],
+                        name="Slow EMA",
+                        line=dict(color='blue')
+                    ),
+                    row=1, col=1
+                )
+
+                # Buy signals
+                buy_signals = df[df['position'] == 2]
+                fig.add_trace(
+                    go.Scatter(
+                        x=buy_signals['open_time'],
+                        y=buy_signals['low'] * 0.995,
+                        mode='markers',
+                        name='Buy Signal',
+                        marker=dict(symbol='triangle-up', color='green', size=10)
+                    ),
+                    row=1, col=1
+                )
+
+                # Sell signals
+                sell_signals = df[df['position'] == -2]
+                fig.add_trace(
+                    go.Scatter(
+                        x=sell_signals['open_time'],
+                        y=sell_signals['high'] * 1.005,
+                        mode='markers',
+                        name='Sell Signal',
+                        marker=dict(symbol='triangle-down', color='red', size=10)
+                    ),
+                    row=1, col=1
+                )
+
+        # Technical indicators
         if indicators:
             indicator_agent = IndicatorAgent(df)
 
@@ -99,7 +144,6 @@ class ChartAgent:
                         row=3, col=1
                     )
 
-        # Layout
         fig.update_layout(
             title=f"{symbol} Price Analysis",
             yaxis_title="Price (USDT)",
@@ -113,7 +157,6 @@ class ChartAgent:
         fig.update_xaxes(matches='x')
         fig.update_yaxes(fixedrange=False)
 
-        # Save nếu cần
         if save:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             fig.write_html(f"{self.output_dir}/{symbol}_combined_{timestamp}.html")
@@ -168,5 +211,34 @@ class ChartAgent:
         if save:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             fig.write_html(f"{self.output_dir}/{symbol}_line_{timestamp}.html")
+
+        return fig
+
+    def plot_equity_curve(self, df, backtest_results, symbol="BTCUSDT", save=False):
+        """
+        Plot the equity curve from backtest results.
+        """
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=df['open_time'],
+                y=backtest_results,
+                mode='lines',
+                name='Equity Curve',
+                line=dict(color='green')
+            )
+        )
+
+        fig.update_layout(
+            title=f"{symbol} Equity Curve",
+            yaxis_title="Portfolio Value (USDT)",
+            height=800,
+            margin=dict(b=50, t=100),
+            hovermode='x unified'
+        )
+
+        if save:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            fig.write_html(f"{self.output_dir}/{symbol}_equity_{timestamp}.html")
 
         return fig

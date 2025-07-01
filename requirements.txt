@@ -4,8 +4,10 @@ ccxt>=4.0.0
 plotly>=5.0.0
 pandas>=2.0.0
 pandas_ta
-numpy==1.21.6
+numpy>=1.22
 python-dotenv>=1.0.0
 aiohttp==3.9.0
+backtrader
+vectorbt
 TA_Lib-0.4.28-cp310-cp310-win_amd64.whl
 
