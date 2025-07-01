@@ -3,35 +3,46 @@ import plotly.subplots as sp
 import pandas as pd
 from datetime import datetime
 from utils.data_processor import calculate_heikin_ashi
+from agents.indicator_agent import IndicatorAgent  # Đảm bảo bạn có file này
 
 class ChartAgent:
     def __init__(self):
         self.output_dir = "data/processed"
 
-    def plot_combined_charts(self, df, symbol="BTCUSDT", save=False):
-        ha_df = calculate_heikin_ashi(df)
+    def plot_combined_charts(self, df, symbol="BTCUSDT", indicators=None, save=False):
         """
         Plot standard candlestick and Heikin Ashi charts in subplots.
         Args:
             df (pandas.DataFrame): DataFrame with columns [open_time, open, high, low, close].
             symbol (str): Trading pair symbol.
+            indicators (list): List of indicators to calculate (e.g., ["sma", "rsi"]).
             save (bool): If True, save the chart as HTML.
         Returns:
             plotly.graph_objects.Figure: The combined chart.
         """
-        # Calculate Heikin Ashi data
+
+        # Tính Heikin Ashi
         ha_df = calculate_heikin_ashi(df)
 
-        # Create subplots
+        # Kiểm tra xem có vẽ RSI hay không để xác định số subplot
+        show_rsi = indicators and "rsi" in indicators
+        total_rows = 3 if show_rsi else 2
+
+        # Tạo subplots
         fig = sp.make_subplots(
-            rows=2, cols=1,
+            rows=total_rows,
+            cols=1,
             shared_xaxes=True,
             vertical_spacing=0.05,
-            subplot_titles=(f"{symbol} Candlestick", f"{symbol} Heikin Ashi"),
-            row_heights=[0.5, 0.5]
+            subplot_titles=(
+                f"{symbol} Candlestick",
+                f"{symbol} Heikin Ashi",
+                "RSI" if show_rsi else None
+            ),
+            row_heights=[0.4, 0.4, 0.2] if show_rsi else [0.5, 0.5]
         )
 
-        # Standard Candlestick
+        # Candlestick
         fig.add_trace(
             go.Candlestick(
                 x=df['open_time'],
@@ -44,7 +55,7 @@ class ChartAgent:
             row=1, col=1
         )
 
-        # Heikin Ashi Candlestick
+        # Heikin Ashi
         fig.add_trace(
             go.Candlestick(
                 x=ha_df['open_time'],
@@ -59,21 +70,50 @@ class ChartAgent:
             row=2, col=1
         )
 
-        # Update layout
+        # Chỉ báo kỹ thuật
+        if indicators:
+            indicator_agent = IndicatorAgent(df)
+
+            for ind in indicators:
+                if ind == "sma":
+                    df = indicator_agent.calculate_sma(length=14)
+                    fig.add_trace(
+                        go.Scatter(
+                            x=df['open_time'],
+                            y=df['sma'],
+                            name="SMA",
+                            line=dict(color='blue')
+                        ),
+                        row=1, col=1
+                    )
+
+                elif ind == "rsi":
+                    df = indicator_agent.calculate_rsi(length=14)
+                    fig.add_trace(
+                        go.Scatter(
+                            x=df['open_time'],
+                            y=df['rsi'],
+                            name="RSI",
+                            line=dict(color='purple')
+                        ),
+                        row=3, col=1
+                    )
+
+        # Layout
         fig.update_layout(
             title=f"{symbol} Price Analysis",
-            xaxis_title="Time",
             yaxis_title="Price (USDT)",
-            xaxis2_title="Time",
-            yaxis2_title="Price (USDT)",
             xaxis_rangeslider_visible=False,
             showlegend=True,
-            height=800
+            height=1400 if show_rsi else 1000,
+            margin=dict(b=50, t=100),
+            hovermode='x unified'
         )
 
-        # Update x-axes to share zooming
         fig.update_xaxes(matches='x')
+        fig.update_yaxes(fixedrange=False)
 
+        # Save nếu cần
         if save:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             fig.write_html(f"{self.output_dir}/{symbol}_combined_{timestamp}.html")
@@ -81,9 +121,6 @@ class ChartAgent:
         return fig
 
     def plot_candlestick(self, df, symbol="BTCUSDT", save=False):
-        """
-        Plot a standard candlestick chart (kept for compatibility).
-        """
         fig = go.Figure(data=[go.Candlestick(
             x=df['open_time'],
             open=df['open'],
@@ -95,10 +132,14 @@ class ChartAgent:
 
         fig.update_layout(
             title=f"{symbol} Candlestick Chart",
-            xaxis_title="Time",
             yaxis_title="Price (USDT)",
-            xaxis_rangeslider_visible=False
+            xaxis_rangeslider_visible=False,
+            height=800,
+            margin=dict(b=50, t=100),
+            hovermode='x unified'
         )
+
+        fig.update_yaxes(fixedrange=False)
 
         if save:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -107,9 +148,6 @@ class ChartAgent:
         return fig
 
     def plot_line(self, df, symbol="BTCUSDT", save=False):
-        """
-        Plot a line chart of closing prices (kept for compatibility).
-        """
         fig = go.Figure(data=[go.Scatter(
             x=df['open_time'],
             y=df['close'],
@@ -119,9 +157,13 @@ class ChartAgent:
 
         fig.update_layout(
             title=f"{symbol} Closing Price",
-            xaxis_title="Time",
-            yaxis_title="Price (USDT)"
+            yaxis_title="Price (USDT)",
+            height=800,
+            margin=dict(b=50, t=100),
+            hovermode='x unified'
         )
+
+        fig.update_yaxes(fixedrange=False)
 
         if save:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
