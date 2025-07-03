@@ -1,7 +1,7 @@
 from autogen import UserProxyAgent
 from agents.binance_agent import BinanceAgent
 from agents.chart_agent import ChartAgent
-from agents.backtest_agent import BacktestAgent  # <-- THÊM DÒNG NÀY
+from agents.backtest_agent import BacktestAgent  
 
 class BinanceUserProxy:
     def __init__(self):

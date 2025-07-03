@@ -12,15 +12,10 @@ class ChartAgent:
         self.output_dir = "data/processed"
 
     def plot_combined_charts(self, df, symbol="BTCUSDT", indicators=None, strategy=None, save=False):
-        """
-        Plot standard candlestick and Heikin Ashi charts in subplots, with optional RSI subplot.
-        Uses Plotly's default interactions, with no custom interaction logic.
-        """
         ha_df = calculate_heikin_ashi(df)
         show_rsi = indicators and "rsi" in indicators
         total_rows = 3 if show_rsi else 2
 
-        # Define subplot titles and row heights based on show_rsi
         subplot_titles = (
             f"{symbol} Candlestick",
             f"{symbol} Heikin Ashi",
@@ -32,7 +27,6 @@ class ChartAgent:
         
         row_heights = [0.4, 0.4, 0.2] if show_rsi else [0.5, 0.5]
 
-        # Create subplots with the correct number of rows
         fig = sp.make_subplots(
             rows=total_rows,
             cols=1,
@@ -42,7 +36,6 @@ class ChartAgent:
             row_heights=row_heights
         )
 
-        # Candlestick chart
         fig.add_trace(
             go.Candlestick(
                 x=df['open_time'],
@@ -55,7 +48,6 @@ class ChartAgent:
             row=1, col=1
         )
 
-        # Heikin Ashi chart
         fig.add_trace(
             go.Candlestick(
                 x=ha_df['open_time'],
@@ -70,14 +62,11 @@ class ChartAgent:
             row=2, col=1
         )
 
-        # Strategy
         if strategy:
             strategy_agent = StrategyAgent(df)
+            df = strategy_agent.apply_strategy(strategy, fast_length=9, slow_length=21)
 
             if strategy.lower() == "ema_crossover":
-                df = strategy_agent.ema_crossover_strategy(fast_length=9, slow_length=21)
-
-                # Fast EMA
                 fig.add_trace(
                     go.Scatter(
                         x=df['open_time'],
@@ -88,7 +77,6 @@ class ChartAgent:
                     row=1, col=1
                 )
 
-                # Slow EMA
                 fig.add_trace(
                     go.Scatter(
                         x=df['open_time'],
@@ -99,7 +87,6 @@ class ChartAgent:
                     row=1, col=1
                 )
 
-                # Buy signals
                 buy_signals = df[df['position'] == 2]
                 fig.add_trace(
                     go.Scatter(
@@ -112,7 +99,6 @@ class ChartAgent:
                     row=1, col=1
                 )
 
-                # Sell signals
                 sell_signals = df[df['position'] == -2]
                 fig.add_trace(
                     go.Scatter(
@@ -125,10 +111,8 @@ class ChartAgent:
                     row=1, col=1
                 )
 
-        # Technical indicators
         if indicators:
             indicator_agent = IndicatorAgent(df)
-
             for ind in indicators:
                 if ind == "sma":
                     df = indicator_agent.calculate_sma(length=14)
@@ -141,7 +125,6 @@ class ChartAgent:
                         ),
                         row=1, col=1
                     )
-
                 elif ind == "rsi" and show_rsi:
                     df = indicator_agent.calculate_rsi(length=14)
                     fig.add_trace(
@@ -154,7 +137,6 @@ class ChartAgent:
                         row=3, col=1
                     )
 
-        # Hide any residual third subplot when RSI is not shown
         if not show_rsi:
             fig.update_layout(
                 yaxis3=dict(visible=False),
@@ -168,7 +150,6 @@ class ChartAgent:
             margin=dict(b=50, t=100),
         )
 
-        # Ensure grids are visible on all subplots and disable rangeslider
         fig.update_yaxes(showgrid=True)
         fig.update_xaxes(rangeslider_visible=False)
 
@@ -229,9 +210,6 @@ class ChartAgent:
         return fig
 
     def plot_equity_curve(self, df, backtest_results, symbol="BTCUSDT", save=False):
-        """
-        Plot the equity curve from backtest results.
-        """
         fig = go.Figure()
         fig.add_trace(
             go.Scatter(
