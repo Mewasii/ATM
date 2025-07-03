@@ -11,24 +11,69 @@ class ChartAgent:
         self.output_dir = "data/processed"
         self.data_calc_agent = DataCalculationAgent()
 
-    def plot_combined_charts(self, df, symbol="BTCUSDT", indicators=None, strategy=None, save=False):
-        ha_df = calculate_heikin_ashi(df)
-        show_rsi = indicators and "rsi" in indicators
-        total_rows = 1 if chart_type == "normal" else 2
+    def calculate_heikin_ashi(self, df):
+        """
+        Calculate Heikin Ashi candles from OHLC data.
+        Args:
+            df: DataFrame with columns ['open', 'high', 'low', 'close', 'open_time']
+        Returns:
+            DataFrame with Heikin Ashi columns ['ha_open', 'ha_high', 'ha_low', 'ha_close', 'open_time']
+        """
+        # Validate input DataFrame
+        required_columns = ['open', 'high', 'low', 'close', 'open_time']
+        if not all(col in df.columns for col in required_columns):
+            raise ValueError(f"Input DataFrame must contain columns: {required_columns}")
+
+        # Create a copy of the DataFrame
+        ha_df = df.copy()
+
+        # Calculate Heikin Ashi columns
+        ha_df['ha_close'] = (df['open'] + df['high'] + df['low'] + df['close']) / 4
+        ha_df['ha_open'] = (df['open'].shift(1) + df['close'].shift(1)) / 2
+        ha_df['ha_open'].iloc[0] = (df['open'].iloc[0] + df['close'].iloc[0]) / 2
+
+        # Use ha_df for ha_high and ha_low to reference ha_open and ha_close
+        ha_df['ha_high'] = ha_df[['high', 'ha_open', 'ha_close']].max(axis=1)
+        ha_df['ha_low'] = ha_df[['low', 'ha_open', 'ha_close']].min(axis=1)
+
+        return ha_df
+
+    def plot_combined_charts(self, df, symbol="BTCUSDT", indicators=None, strategy=None, chart_type="normal", save=False):
+        """
+        Plot combined charts (Candlestick, Heikin Ashi, indicators).
+        Args:
+            df: DataFrame with price data
+            symbol: Trading pair symbol (default: BTCUSDT)
+            indicators: List of indicators to plot (e.g., ['sma', 'rsi'])
+            strategy: Trading strategy to apply (e.g., 'ema_crossover')
+            chart_type: Chart type ('normal' or 'heikin_ashi')
+            save: Save chart to HTML file (default: False)
+        Returns:
+            Plotly figure object
+        """
+        indicators = indicators or []
+        show_rsi = "rsi" in indicators
+        ha_df = self.calculate_heikin_ashi(df) if chart_type == "heikin_ashi" else None
+
+        total_rows = 1
+        if chart_type == "heikin_ashi":
+            total_rows += 1
         if show_rsi:
             total_rows += 1
 
-        subplot_titles = (
-            f"{symbol} Candlestick",
-            "RSI" if show_rsi else None
-        ) if chart_type == "normal" else (
-            f"{symbol} Candlestick",
-            f"{symbol} Heikin Ashi",
-            "RSI" if show_rsi else None
-        )
-        row_heights = [0.6, 0.2] if chart_type == "normal" and show_rsi else [1.0]
+        row_heights = [0.6]
+        if chart_type == "heikin_ashi" and show_rsi:
+            row_heights = [0.4, 0.3, 0.2]
+        elif chart_type == "heikin_ashi":
+            row_heights = [0.5, 0.5]
+        elif show_rsi:
+            row_heights = [0.7, 0.3]
+
+        subplot_titles = [f"{symbol} Candlestick"]
         if chart_type == "heikin_ashi":
-            row_heights = [0.4, 0.4, 0.2] if show_rsi else [0.5, 0.5]
+            subplot_titles.append(f"{symbol} Heikin Ashi")
+        if show_rsi:
+            subplot_titles.append("RSI")
 
         fig = sp.make_subplots(
             rows=total_rows,
@@ -51,19 +96,20 @@ class ChartAgent:
             row=1, col=1
         )
 
-        fig.add_trace(
-            go.Candlestick(
-                x=ha_df['open_time'],
-                open=ha_df['ha_open'],
-                high=ha_df['ha_high'],
-                low=ha_df['ha_low'],
-                close=ha_df['ha_close'],
-                name="Heikin Ashi",
-                increasing_line_color='green',
-                decreasing_line_color='red'
-            ),
-            row=2, col=1
-        )
+        if chart_type == "heikin_ashi" and ha_df is not None:
+            fig.add_trace(
+                go.Candlestick(
+                    x=ha_df['open_time'],
+                    open=ha_df['ha_open'],
+                    high=ha_df['ha_high'],
+                    low=ha_df['ha_low'],
+                    close=ha_df['ha_close'],
+                    name="Heikin Ashi",
+                    increasing_line_color='green',
+                    decreasing_line_color='red'
+                ),
+                row=2, col=1
+            )
 
         if strategy:
             strategy_agent = StrategyAgent(df)
@@ -79,7 +125,6 @@ class ChartAgent:
                     ),
                     row=1, col=1
                 )
-
                 fig.add_trace(
                     go.Scatter(
                         x=df['open_time'],
@@ -89,7 +134,6 @@ class ChartAgent:
                     ),
                     row=1, col=1
                 )
-
                 buy_signals = df[df['position'] == 2]
                 fig.add_trace(
                     go.Scatter(
@@ -101,7 +145,6 @@ class ChartAgent:
                     ),
                     row=1, col=1
                 )
-
                 sell_signals = df[df['position'] == -2]
                 fig.add_trace(
                     go.Scatter(
@@ -137,22 +180,16 @@ class ChartAgent:
                             name="RSI",
                             line=dict(color='purple')
                         ),
-                        row=2 if chart_type == "normal" else 3, col=1
+                        row=total_rows, col=1
                     )
-
-        if not show_rsi:
-            fig.update_layout(
-                yaxis2=dict(visible=False) if chart_type == "normal" else None,
-                yaxis3=dict(visible=False) if chart_type == "heikin_ashi" else None,
-            )
 
         fig.update_layout(
             title=f"{symbol} Price Analysis",
             yaxis_title="Price (USDT)",
             showlegend=True,
-            height=1400 if show_rsi else (1000 if chart_type == "heikin_ashi" else 800),
+            height=1000 if total_rows > 1 else 800,
             margin=dict(b=50, t=100),
-            dragmode=False,
+            dragmode=False
         )
 
         fig.update_yaxes(showgrid=True)
@@ -178,7 +215,7 @@ class ChartAgent:
             title=f"{symbol} Candlestick Chart",
             yaxis_title="Price (USDT)",
             height=800,
-            margin=dict(b=50, t=100),
+            margin=dict(b=50, t=100)
         )
 
         fig.update_yaxes(showgrid=True)
@@ -202,7 +239,7 @@ class ChartAgent:
             title=f"{symbol} Closing Price",
             yaxis_title="Price (USDT)",
             height=800,
-            margin=dict(b=50, t=100),
+            margin=dict(b=50, t=100)
         )
 
         fig.update_yaxes(showgrid=True)
@@ -231,7 +268,7 @@ class ChartAgent:
             yaxis_title="Portfolio Value (USDT)",
             height=800,
             margin=dict(b=50, t=100),
-            dragmode=False,
+            dragmode=False
         )
 
         fig.update_xaxes(rangeslider_visible=False, fixedrange=True)

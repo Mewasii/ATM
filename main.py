@@ -28,7 +28,7 @@ def main():
     
     # Lấy tham số từ dòng lệnh
     symbol, interval, limit, chart_type, indicators, strategy = parse_arguments()
-    
+
     # Chạy workflow
     try:
         proxy.run_workflow(

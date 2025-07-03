@@ -1,11 +1,9 @@
 from autogen import UserProxyAgent
 from agents.binance_agent import BinanceAgent
 from agents.chart_agent import ChartAgent
-<<<<<<< HEAD
+
 from agents.backtest_agent import BacktestAgent  
-=======
-from agents.backtest_agent import BacktestAgent
->>>>>>> 3e95001d155b8818d7e9738e1787a78c1356edfc
+
 
 class BinanceUserProxy:
     def __init__(self):
