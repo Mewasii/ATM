@@ -2,30 +2,33 @@ import plotly.graph_objects as go
 import plotly.subplots as sp
 import pandas as pd
 from datetime import datetime
-
-from utils.data_processor import calculate_heikin_ashi
-from agents.indicator_agent import IndicatorAgent
+from agents.data_calculation_agent import DataCalculationAgent
 from agents.strategy_agent import StrategyAgent
+from agents.indicator_agent import IndicatorAgent
 
 class ChartAgent:
     def __init__(self):
         self.output_dir = "data/processed"
+        self.data_calc_agent = DataCalculationAgent()
 
     def plot_combined_charts(self, df, symbol="BTCUSDT", indicators=None, strategy=None, save=False):
         ha_df = calculate_heikin_ashi(df)
         show_rsi = indicators and "rsi" in indicators
-        total_rows = 3 if show_rsi else 2
+        total_rows = 1 if chart_type == "normal" else 2
+        if show_rsi:
+            total_rows += 1
 
         subplot_titles = (
             f"{symbol} Candlestick",
-            f"{symbol} Heikin Ashi",
-            "RSI"
-        ) if show_rsi else (
+            "RSI" if show_rsi else None
+        ) if chart_type == "normal" else (
             f"{symbol} Candlestick",
-            f"{symbol} Heikin Ashi"
+            f"{symbol} Heikin Ashi",
+            "RSI" if show_rsi else None
         )
-        
-        row_heights = [0.4, 0.4, 0.2] if show_rsi else [0.5, 0.5]
+        row_heights = [0.6, 0.2] if chart_type == "normal" and show_rsi else [1.0]
+        if chart_type == "heikin_ashi":
+            row_heights = [0.4, 0.4, 0.2] if show_rsi else [0.5, 0.5]
 
         fig = sp.make_subplots(
             rows=total_rows,
@@ -115,39 +118,41 @@ class ChartAgent:
             indicator_agent = IndicatorAgent(df)
             for ind in indicators:
                 if ind == "sma":
-                    df = indicator_agent.calculate_sma(length=14)
+                    calc_df = indicator_agent.calculate_sma(length=14)
                     fig.add_trace(
                         go.Scatter(
-                            x=df['open_time'],
-                            y=df['sma'],
+                            x=calc_df['open_time'],
+                            y=calc_df['sma'],
                             name="SMA",
                             line=dict(color='blue')
                         ),
-                        row=1, col=1
+                        row=1 if chart_type == "normal" else 2, col=1
                     )
                 elif ind == "rsi" and show_rsi:
-                    df = indicator_agent.calculate_rsi(length=14)
+                    calc_df = indicator_agent.calculate_rsi(length=14)
                     fig.add_trace(
                         go.Scatter(
-                            x=df['open_time'],
-                            y=df['rsi'],
+                            x=calc_df['open_time'],
+                            y=calc_df['rsi'],
                             name="RSI",
                             line=dict(color='purple')
                         ),
-                        row=3, col=1
+                        row=2 if chart_type == "normal" else 3, col=1
                     )
 
         if not show_rsi:
             fig.update_layout(
-                yaxis3=dict(visible=False),
+                yaxis2=dict(visible=False) if chart_type == "normal" else None,
+                yaxis3=dict(visible=False) if chart_type == "heikin_ashi" else None,
             )
 
         fig.update_layout(
             title=f"{symbol} Price Analysis",
             yaxis_title="Price (USDT)",
             showlegend=True,
-            height=1400 if show_rsi else 1000,
+            height=1400 if show_rsi else (1000 if chart_type == "heikin_ashi" else 800),
             margin=dict(b=50, t=100),
+            dragmode=False,
         )
 
         fig.update_yaxes(showgrid=True)
@@ -216,7 +221,7 @@ class ChartAgent:
                 x=df['open_time'],
                 y=backtest_results,
                 mode='lines',
-                name='Equity Curve',
+                name="Equity Curve",
                 line=dict(color='green')
             )
         )
@@ -226,10 +231,11 @@ class ChartAgent:
             yaxis_title="Portfolio Value (USDT)",
             height=800,
             margin=dict(b=50, t=100),
+            dragmode=False,
         )
 
-        fig.update_yaxes(showgrid=True)
-        fig.update_xaxes(rangeslider_visible=False)
+        fig.update_xaxes(rangeslider_visible=False, fixedrange=True)
+        fig.update_yaxes(showgrid=True, fixedrange=False)
 
         if save:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
