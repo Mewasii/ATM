@@ -7,7 +7,7 @@ def main():
         interval="1h",
         limit=100,
         chart_type="combined",
-        indicators=["sma", "rsi"],
+        indicators=["sma","rsi"],
         strategy="ema_crossover"  # Thêm tham số strategy
     )
 

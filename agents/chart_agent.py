@@ -5,7 +5,7 @@ from datetime import datetime
 
 from utils.data_processor import calculate_heikin_ashi
 from agents.indicator_agent import IndicatorAgent
-from agents.strategy_agent import StrategyAgent  # Đảm bảo bạn có file này
+from agents.strategy_agent import StrategyAgent
 
 class ChartAgent:
     def __init__(self):
@@ -13,23 +13,33 @@ class ChartAgent:
 
     def plot_combined_charts(self, df, symbol="BTCUSDT", indicators=None, strategy=None, save=False):
         """
-        Plot standard candlestick and Heikin Ashi charts in subplots.
+        Plot standard candlestick and Heikin Ashi charts in subplots, with optional RSI subplot.
+        Uses Plotly's default interactions, with no custom interaction logic.
         """
         ha_df = calculate_heikin_ashi(df)
         show_rsi = indicators and "rsi" in indicators
         total_rows = 3 if show_rsi else 2
 
+        # Define subplot titles and row heights based on show_rsi
+        subplot_titles = (
+            f"{symbol} Candlestick",
+            f"{symbol} Heikin Ashi",
+            "RSI"
+        ) if show_rsi else (
+            f"{symbol} Candlestick",
+            f"{symbol} Heikin Ashi"
+        )
+        
+        row_heights = [0.4, 0.4, 0.2] if show_rsi else [0.5, 0.5]
+
+        # Create subplots with the correct number of rows
         fig = sp.make_subplots(
             rows=total_rows,
             cols=1,
             shared_xaxes=True,
             vertical_spacing=0.05,
-            subplot_titles=(
-                f"{symbol} Candlestick",
-                f"{symbol} Heikin Ashi",
-                "RSI" if show_rsi else None
-            ),
-            row_heights=[0.4, 0.4, 0.2] if show_rsi else [0.5, 0.5]
+            subplot_titles=subplot_titles,
+            row_heights=row_heights
         )
 
         # Candlestick chart
@@ -132,7 +142,7 @@ class ChartAgent:
                         row=1, col=1
                     )
 
-                elif ind == "rsi":
+                elif ind == "rsi" and show_rsi:
                     df = indicator_agent.calculate_rsi(length=14)
                     fig.add_trace(
                         go.Scatter(
@@ -144,18 +154,23 @@ class ChartAgent:
                         row=3, col=1
                     )
 
+        # Hide any residual third subplot when RSI is not shown
+        if not show_rsi:
+            fig.update_layout(
+                yaxis3=dict(visible=False),
+            )
+
         fig.update_layout(
             title=f"{symbol} Price Analysis",
             yaxis_title="Price (USDT)",
-            xaxis_rangeslider_visible=False,
             showlegend=True,
             height=1400 if show_rsi else 1000,
             margin=dict(b=50, t=100),
-            hovermode='x unified'
         )
 
-        fig.update_xaxes(matches='x')
-        fig.update_yaxes(fixedrange=False)
+        # Ensure grids are visible on all subplots and disable rangeslider
+        fig.update_yaxes(showgrid=True)
+        fig.update_xaxes(rangeslider_visible=False)
 
         if save:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -176,13 +191,12 @@ class ChartAgent:
         fig.update_layout(
             title=f"{symbol} Candlestick Chart",
             yaxis_title="Price (USDT)",
-            xaxis_rangeslider_visible=False,
             height=800,
             margin=dict(b=50, t=100),
-            hovermode='x unified'
         )
 
-        fig.update_yaxes(fixedrange=False)
+        fig.update_yaxes(showgrid=True)
+        fig.update_xaxes(rangeslider_visible=False)
 
         if save:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -203,10 +217,10 @@ class ChartAgent:
             yaxis_title="Price (USDT)",
             height=800,
             margin=dict(b=50, t=100),
-            hovermode='x unified'
         )
 
-        fig.update_yaxes(fixedrange=False)
+        fig.update_yaxes(showgrid=True)
+        fig.update_xaxes(rangeslider_visible=False)
 
         if save:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -234,8 +248,10 @@ class ChartAgent:
             yaxis_title="Portfolio Value (USDT)",
             height=800,
             margin=dict(b=50, t=100),
-            hovermode='x unified'
         )
+
+        fig.update_yaxes(showgrid=True)
+        fig.update_xaxes(rangeslider_visible=False)
 
         if save:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
