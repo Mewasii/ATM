@@ -8,7 +8,7 @@ class BinanceAgent:
         self.symbol = Config.DEFAULT_SYMBOL
         self.interval = Config.DEFAULT_INTERVAL
 
-    def fetch_klines(self, limit=100):
+    def fetch_klines(self, limit=1000):
         """
         Fetch historical kline data for the specified symbol and interval.
         Args:
