@@ -5,12 +5,34 @@ from datetime import datetime
 from agents.data_calculation_agent import DataCalculationAgent
 from agents.strategy_agent import StrategyAgent
 from agents.indicator_agent import IndicatorAgent
+from filelock import FileLock
+import os
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 class ChartAgent:
     def __init__(self):
         """Initialize ChartAgent with a DataCalculationAgent instance."""
         self.output_dir = "data/processed"
         self.data_calc_agent = DataCalculationAgent()
+
+    def load_from_csv(self, data_file):
+        """
+        Load data from CSV file.
+        Args:
+            data_file: Path to CSV file
+        Returns:
+            pandas.DataFrame: Data from CSV
+        """
+        lock = FileLock(f"{data_file}.lock")
+        with lock:
+            if os.path.exists(data_file):
+                df = pd.read_csv(data_file, parse_dates=['open_time'])
+                logger.info(f"Loaded data from {data_file}")
+                return df
+            raise ValueError(f"No data file found at {data_file}")
 
     def _validate_df(self, df):
         """Validate DataFrame with lenient checks."""
@@ -21,29 +43,33 @@ class ChartAgent:
         if df.empty:
             raise ValueError("DataFrame is empty")
         if df[required_columns].isnull().any().any():
-            print("Warning: DataFrame contains null values, proceeding with available data")
+            logger.warning("DataFrame contains null values, proceeding with available data")
 
-    def plot_combined_charts(self, df, symbol="BTCUSDT", indicators=None, strategy=None, chart_type="normal", save=False, ha_df=None):
+    def plot_combined_charts(self, data_file, symbol="BTCUSDT", interval="1h", indicators=None, strategy=None, chart_type="normal", save=False):
         """
         Plot combined charts with range slider for x-axis control, increased spacing, and entry/exit signals.
         Args:
-            df: DataFrame with ['open_time', 'open', 'high', 'low', 'close']
+            data_file: Path to CSV file with ['open_time', 'open', 'high', 'low', 'close']
             symbol: Trading pair symbol (default: BTCUSDT)
+            interval: Time interval (default: 1h)
             indicators: List of indicators (e.g., ['sma', 'rsi'])
             strategy: Strategy name (e.g., 'ema_crossover')
             chart_type: 'normal' (candlestick only) or 'heikin_ashi' (both with strategy on HA)
             save: Save chart to HTML file (default: False)
-            ha_df: Precomputed Heikin Ashi DataFrame (optional, overrides data_calc_agent)
         Returns:
             Plotly figure object
         """
+        df = self.load_from_csv(data_file)
         self._validate_df(df)
         indicators = indicators or []
         show_rsi = "rsi" in indicators
 
-        # Use precomputed ha_df if provided, else calculate
-        ha_df = ha_df if ha_df is not None else (self.data_calc_agent.calculate_heikin_ashi(df) if chart_type == "heikin_ashi" else None)
-        print(f"chart_type: {chart_type}, ha_df available: {ha_df is not None}, ha_df columns: {ha_df.columns.tolist() if ha_df is not None else 'None'}")
+        # Use precomputed Heikin Ashi data if available
+        ha_file = os.path.join(self.output_dir, f"{symbol}_{interval}_heikin_ashi.csv")
+        ha_df = self.load_from_csv(ha_file) if chart_type == "heikin_ashi" and os.path.exists(ha_file) else None
+        if chart_type == "heikin_ashi" and ha_df is None:
+            ha_df = self.data_calc_agent.calculate_heikin_ashi(data_file, symbol, interval)
+        logger.info(f"chart_type: {chart_type}, ha_df available: {ha_df is not None}, ha_df columns: {ha_df.columns.tolist() if ha_df is not None else 'None'}")
 
         total_rows = 1 + (1 if chart_type == "heikin_ashi" else 0) + (1 if show_rsi else 0)
         row_heights = [1.0] * total_rows
@@ -70,9 +96,9 @@ class ChartAgent:
             row=1, col=1
         )
 
-        # Add Heikin Ashi chart with debug
+        # Add Heikin Ashi chart
         if chart_type == "heikin_ashi" and ha_df is not None:
-            print("Adding Heikin Ashi trace, ha_df columns:", ha_df.columns.tolist())
+            logger.info(f"Adding Heikin Ashi trace, ha_df columns: {ha_df.columns.tolist()}")
             if not ha_df.empty:
                 fig.add_trace(
                     go.Candlestick(
@@ -84,9 +110,9 @@ class ChartAgent:
                 )
 
         if strategy:
-            strategy_agent = StrategyAgent(df)
+            strategy_agent = StrategyAgent(data_file)
             calc_df = strategy_agent.ema_crossover_strategy(
-                fast_length=9, slow_length=21, use_ha_df=(chart_type == "heikin_ashi"), ha_df=ha_df
+                fast_length=9, slow_length=21, use_ha_df=(chart_type == "heikin_ashi"), ha_file=ha_file, symbol=symbol, interval=interval
             )
 
             # Add EMA lines
@@ -134,16 +160,16 @@ class ChartAgent:
                 )
 
         if indicators:
-            indicator_agent = IndicatorAgent(df if chart_type == "normal" else ha_df)
+            indicator_agent = IndicatorAgent(data_file if chart_type == "normal" else ha_file)
             for ind in indicators:
                 if ind == "sma":
-                    calc_df = indicator_agent.calculate_sma(length=14)
+                    calc_df = indicator_agent.calculate_sma(length=14, symbol=symbol, interval=interval)
                     fig.add_trace(
                         go.Scatter(x=calc_df['open_time'], y=calc_df['sma'], name="SMA", line=dict(color='blue')),
                         row=1 if chart_type == "normal" else 2, col=1
                     )
                 elif ind == "rsi" and show_rsi:
-                    calc_df = indicator_agent.calculate_rsi(length=14)
+                    calc_df = indicator_agent.calculate_rsi(length=14, symbol=symbol, interval=interval)
                     fig.add_trace(
                         go.Scatter(x=calc_df['open_time'], y=calc_df['rsi'], name="RSI", line=dict(color='purple')),
                         row=total_rows, col=1
@@ -167,8 +193,9 @@ class ChartAgent:
 
         return fig
 
-    def plot_candlestick(self, df, symbol="BTCUSDT", save=False):
+    def plot_candlestick(self, data_file, symbol="BTCUSDT", save=False):
         """Plot a standalone candlestick chart."""
+        df = self.load_from_csv(data_file)
         self._validate_df(df)
         fig = go.Figure(data=[go.Candlestick(
             x=df['open_time'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], name=symbol
@@ -184,8 +211,9 @@ class ChartAgent:
             fig.write_html(f"{self.output_dir}/{symbol}_candlestick_{timestamp}.html")
         return fig
 
-    def plot_line(self, df, symbol="BTCUSDT", save=False):
+    def plot_line(self, data_file, symbol="BTCUSDT", save=False):
         """Plot a standalone line chart of closing prices."""
+        df = self.load_from_csv(data_file)
         self._validate_df(df)
         fig = go.Figure(data=[go.Scatter(x=df['open_time'], y=df['close'], mode='lines', name=symbol)])
         fig.update_layout(
@@ -199,10 +227,15 @@ class ChartAgent:
             fig.write_html(f"{self.output_dir}/{symbol}_line_{timestamp}.html")
         return fig
 
-    def plot_equity_curve(self, df, backtest_results, symbol="BTCUSDT", save=False):
+    def plot_equity_curve(self, data_file, symbol="BTCUSDT", interval="1h", save=False):
         """Plot the equity curve from backtest results."""
+        df = self.load_from_csv(data_file)
         self._validate_df(df)
-        if not backtest_results or len(backtest_results) != len(df):
+        backtest_file = os.path.join(self.output_dir, f"{symbol}_{interval}_backtest.csv")
+        if os.path.exists(backtest_file):
+            equity_df = self.load_from_csv(backtest_file)
+            backtest_results = equity_df['equity'].tolist()
+        else:
             backtest_results = [0] * len(df)
         fig = go.Figure(data=[go.Scatter(x=df['open_time'], y=backtest_results, mode='lines', name="Equity Curve", line=dict(color='green'))])
         fig.update_layout(

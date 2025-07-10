@@ -1,48 +1,77 @@
 import argparse
-from user_proxy import BinanceUserProxy
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning)
-def parse_arguments():
-    """Phân tích các tham số dòng lệnh."""
-    parser = argparse.ArgumentParser(description="Binance Trading Workflow")
-    parser.add_argument("--symbol", type=str, default="BTCUSDT", help="Cặp giao dịch (e.g., BTCUSDT)")
-    parser.add_argument("--interval", type=str, default="1h", help="Khoảng thời gian (e.g., 1h, 4h, 1d)")
-    parser.add_argument("--limit", type=int, default=100, help="Số lượng nến (e.g., 100)")
-    parser.add_argument("--chart-type", type=str, default="combined", choices=["candlestick", "line", "combined"],
-                        help="Loại biểu đồ (candlestick, line, combined)")
-    parser.add_argument("--indicators", type=str, default=None, 
-                        help="Danh sách các chỉ báo, cách nhau bởi dấu phẩy (e.g., sma,rsi)")
-    parser.add_argument("--strategy", type=str, default=None, 
-                        help="Chiến lược backtest (e.g., ema_crossover)")
-    
-    args = parser.parse_args()
-    
-    # Xử lý indicators
-    indicators = [ind.strip() for ind in args.indicators.split(",")] if args.indicators else None
-    
-    return args.symbol, args.interval, args.limit, args.chart_type, indicators, args.strategy
+from agents.historical_data_agent import HistoricalDataAgent
+from agents.chart_agent import ChartAgent
+from agents.strategy_agent import StrategyAgent
+import logging
+import os
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def main():
-    # Khởi tạo proxy
-    proxy = BinanceUserProxy()
-    
-    # Lấy tham số từ dòng lệnh
-    symbol, interval, limit, chart_type, indicators, strategy = parse_arguments()
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Run HistoricalDataAgent and ChartAgent for data collection and visualization.")
+    parser.add_argument('--symbol', default='BTCUSDT', help='Trading pair symbol (e.g., BTCUSDT)')
+    parser.add_argument('--interval', default='1h', help='Kline interval (e.g., 1h, 1d)')
+    parser.add_argument('--start-date', default='2019-01-01', help='Start date for historical data (YYYY-MM-DD)')
+    parser.add_argument('--limit', type=int, default=1000, help='Limit of klines per request (max 1000)')
+    parser.add_argument('--websocket', action='store_true', help='Enable WebSocket for real-time updates')
+    parser.add_argument('--chart-type', default='combined', choices=['combined', 'candlestick', 'line'], help='Chart type (combined, candlestick, line)')
+    parser.add_argument('--indicators', default='sma,rsi', help='Comma-separated list of indicators (e.g., sma,rsi)')
+    parser.add_argument('--strategy', default='ema_crossover', help='Trading strategy (e.g., ema_crossover)')
+    args = parser.parse_args()
 
-    # Chạy workflow
-    try:
-        proxy.run_workflow(
-            symbol=symbol,
-            interval=interval,
-            limit=limit,
-            chart_type=chart_type,
+    # Initialize HistoricalDataAgent
+    agent = HistoricalDataAgent(symbol=args.symbol, interval=args.interval)
+    
+    # Collect historical data if CSV doesn't exist
+    data_file = os.path.join("data/raw", f"{args.symbol}_{args.interval}.csv")
+    if not os.path.exists(data_file):
+        logger.info(f"Starting historical data collection for {args.symbol} at {args.interval} from {args.start_date}")
+        agent.collect_historical_data(start_date=args.start_date)
+    
+    # Start WebSocket if enabled
+    if args.websocket:
+        logger.info("Starting WebSocket for real-time updates")
+        agent.start_websocket()
+
+    # Initialize ChartAgent
+    chart_agent = ChartAgent()
+    
+    # Parse indicators
+    indicators = args.indicators.split(',') if args.indicators else []
+
+    # Plot chart based on chart-type
+    if args.chart_type == 'combined':
+        logger.info(f"Generating combined chart for {args.symbol} with indicators {indicators} and strategy {args.strategy}")
+        fig = chart_agent.plot_combined_charts(
+            data_file=data_file,
+            symbol=args.symbol,
+            interval=args.interval,
             indicators=indicators,
-            strategy=strategy
+            strategy=args.strategy,
+            chart_type='heikin_ashi' if 'heikin_ashi' in args.chart_type.lower() else 'normal',
+            save=True
         )
-    except ValueError as e:
-        print(f"Lỗi: {e}")
-    except Exception as e:
-        print(f"Đã xảy ra lỗi không mong muốn: {e}")
+        fig.show()
+    elif args.chart_type == 'candlestick':
+        logger.info(f"Generating candlestick chart for {args.symbol}")
+        fig = chart_agent.plot_candlestick(data_file=data_file, symbol=args.symbol, save=True)
+        fig.show()
+    elif args.chart_type == 'line':
+        logger.info(f"Generating line chart for {args.symbol}")
+        fig = chart_agent.plot_line(data_file=data_file, symbol=args.symbol, save=True)
+        fig.show()
+
+    # Keep WebSocket running if enabled
+    if args.websocket:
+        try:
+            while True:
+                pass
+        except KeyboardInterrupt:
+            logger.info("Stopping WebSocket and exiting...")
+            agent.stop_websocket()
 
 if __name__ == "__main__":
     main()

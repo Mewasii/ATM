@@ -1,102 +1,124 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
 from agents.chart_agent import ChartAgent
-from agents.binance_agent import BinanceAgent
+from agents.historical_data_agent import HistoricalDataAgent
 from agents.backtest_agent import BacktestAgent
 from datetime import datetime, date
+import os
+import logging
 
-st.set_page_config(page_icon="favicon.ico", layout="wide")  # Wide layout
-st.title("Chart Dashboard")
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+st.set_page_config(page_icon="favicon.ico", layout="wide")
+st.title("Real-Time Chart Dashboard")
+
+# Initialize agents
 chart_agent = ChartAgent()
-binance_agent = BinanceAgent()
-data_calc_agent = chart_agent.data_calc_agent  # Access DataCalculationAgent
+historical_agent = HistoricalDataAgent()
 
-# Cache data fetching
-@st.cache_data
-def fetch_klines(symbol, interval, start_date):
-    binance_agent.set_symbol(symbol)
-    binance_agent.set_interval(interval)
-    
-    # Calculate number of candles based on start_date and current time
-    current_time = datetime.utcnow()
-    start_time = datetime.combine(start_date, datetime.min.time())
-    time_diff = current_time - start_time
-    
-    # Convert interval to minutes
-    interval_map = {
-        "1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440
-    }
-    interval_minutes = interval_map.get(interval, 60)
-    
-    # Calculate number of candles
-    limit = int(time_diff.total_seconds() / (interval_minutes * 60)) + 1
-    st.write(f"Calculated number of candles: {limit} for interval {interval}")
-    
-    df = binance_agent.fetch_klines(limit=limit)
-    # Convert open_time to datetime64[ns] with timezone handling
-    df['open_time'] = pd.to_datetime(df['open_time'], unit='ms', utc=True).dt.tz_localize(None)
-    df = df.dropna()  # Drop rows with NaN, but keep all columns
-    if df.empty:
-        st.warning("Fetched DataFrame is empty after dropna, using minimal structure")
-        return pd.DataFrame(columns=['open_time', 'open', 'high', 'low', 'close', 'volume'])
-    st.write("Raw Fetched DataFrame:", df.head())  # Debug raw data
-    st.write("Row count after dropna:", len(df))
-    return df
+# Initialize session state
+if 'data_file' not in st.session_state:
+    st.session_state.data_file = None
+if 'websocket_running' not in st.session_state:
+    st.session_state.websocket_running = False
 
 # Input fields
-symbol = st.text_input("Symbol (e.g., BTCUSDT)", "BTCUSDT")
-interval = st.selectbox("Interval", ["1m", "5m", "15m", "1h", "4h", "1d"], index=3)  # Default to 1h
-start_date = st.date_input("Start Date", value=date.today())
+with st.sidebar:
+    st.header("Settings")
+    symbol = st.text_input("Symbol (e.g., BTCUSDT)", "BTCUSDT")
+    interval = st.selectbox("Interval", ["1m", "5m", "15m", "1h", "4h", "1d"], index=3)
+    start_date = st.date_input("Start Date", value=date(2019, 1, 1))
+    chart_type = st.selectbox("Chart Type", ["Normal Candlestick", "Heikin Ashi"], index=0)
+    chart_type_value = "normal" if chart_type == "Normal Candlestick" else "heikin_ashi"
+    initial_cash = st.number_input("Initial Capital", min_value=1000, value=100000)
+    position_size_pct = st.number_input("Position Size (%)", min_value=0.01, max_value=0.20, value=0.10, step=0.01)
+    enable_websocket = st.checkbox("Enable Real-Time Updates (WebSocket)", value=False)
+    run_backtest = st.checkbox("Run Backtest with EMA Crossover", value=False)
 
-# Backtest inputs
-initial_cash = st.number_input("Initial Capital", min_value=1000, value=100000)
-position_size_pct = st.number_input("Position Size (%)", min_value=0.01, max_value=0.20, value=0.10, step=0.01)
+# Set data file path
+data_file = os.path.join("data/raw", f"{symbol}_{interval}.csv")
+st.session_state.data_file = data_file
 
-# Button to fetch data and plot
-if st.button("Fetch Data and Plot"):
-    # Fetch data with error handling
+# Fetch initial data
+if st.button("Fetch Historical Data"):
     try:
-        df = fetch_klines(symbol, interval, start_date)
-        st.write("Fetched DataFrame:", df.head())
-        st.write("DataFrame columns:", df.columns.tolist())
-        st.write("Data types:", df.dtypes)
-        # Precompute Heikin Ashi data
-        ha_df = data_calc_agent.calculate_heikin_ashi(df)
-        st.write("Precomputed Heikin Ashi Data:", ha_df.head() if ha_df is not None and not ha_df.empty else "None or Empty")
-        st.write("Heikin Ashi row count:", len(ha_df) if ha_df is not None else 0)
+        historical_agent.set_symbol(symbol)
+        historical_agent.set_interval(interval)
+        if not os.path.exists(data_file):
+            logger.info(f"Fetching historical data for {symbol} at {interval} from {start_date}")
+            historical_agent.collect_historical_data(start_date=start_date.strftime("%Y-%m-%d"))
+        df = historical_agent.read_data()
+        if df.empty:
+            st.warning("No data available for the selected symbol and interval")
+        else:
+            st.write("Loaded DataFrame:", df.head())
+        # Precompute Heikin Ashi
+        chart_agent.data_calc_agent.calculate_heikin_ashi(data_file, symbol, interval)
     except Exception as e:
         st.error(f"Error fetching or calculating data: {e}")
-        df = pd.DataFrame(columns=['open_time', 'open', 'high', 'low', 'close', 'volume'])
-        ha_df = None
 
-    # Optional backtest
-    backtest_results = None
-    if st.checkbox("Run Backtest with EMA Crossover"):
-        try:
-            backtest_agent = BacktestAgent(df)
-            results = backtest_agent.run_backtest(strategy="ema_crossover", initial_cash=initial_cash, position_size_pct=position_size_pct)
-            st.write("Backtest Results:", {k: v for k, v in results.items() if k != 'equity'})
-        except Exception as e:
-            st.error(f"Error running backtest: {e}")
-            backtest_results = None
-
-    # Select chart type
-    chart_type = st.selectbox("Select Chart Type:", ["Normal Candlestick", "Heikin Ashi"], index=0)
-    chart_type_value = "normal" if chart_type == "Normal Candlestick" else "heikin_ashi"
-
-    # Generate figures with detailed error handling
+# Handle WebSocket
+if enable_websocket and not st.session_state.websocket_running:
     try:
-        combined_fig = chart_agent.plot_combined_charts(df, symbol=symbol, indicators=["sma"], strategy="ema_crossover", chart_type=chart_type_value, ha_df=ha_df)
-        st.write("Combined Fig Data:", [trace.name for trace in combined_fig.data])
+        historical_agent.set_symbol(symbol)
+        historical_agent.set_interval(interval)
+        historical_agent.start_websocket()
+        st.session_state.websocket_running = True
+        st.write("Started WebSocket for real-time updates.")
+    except Exception as e:
+        st.error(f"Error starting WebSocket: {e}")
+
+if not enable_websocket and st.session_state.websocket_running:
+    try:
+        historical_agent.stop_websocket()
+        st.session_state.websocket_running = False
+        st.write("Stopped WebSocket.")
+    except Exception as e:
+        st.error(f"Error stopping WebSocket: {e}")
+
+# Run backtest if enabled
+backtest_results = None
+if run_backtest and os.path.exists(data_file):
+    try:
+        backtest_agent = BacktestAgent(data_file)
+        results = backtest_agent.run_backtest(
+            strategy="ema_crossover",
+            initial_cash=initial_cash,
+            position_size_pct=position_size_pct,
+            symbol=symbol,
+            interval=interval
+        )
+        backtest_results = results.get('equity', [])
+        st.write("Backtest Results:", {k: v for k, v in results.items() if k != 'equity'})
+    except Exception as e:
+        st.error(f"Error running backtest: {e}")
+
+# Plot charts
+if os.path.exists(data_file):
+    try:
+        combined_fig = chart_agent.plot_combined_charts(
+            data_file,
+            symbol=symbol,
+            interval=interval,
+            indicators=["sma", "rsi"],
+            strategy="ema_crossover",
+            chart_type=chart_type_value
+        )
+        st.header("Real-Time Combined Charts")
+        st.plotly_chart(combined_fig, use_container_width=True, config={'scrollZoom': True}, key="combined_chart")
+        
+        # Plot equity curve if backtest was run
+        if backtest_results:
+            equity_fig = chart_agent.plot_equity_curve(data_file, symbol=symbol, interval=interval)
+            st.header("Equity Curve")
+            st.plotly_chart(equity_fig, use_container_width=True, config={'scrollZoom': True}, key="equity_chart")
     except Exception as e:
         st.error(f"Error generating charts: {e}")
-        combined_fig = go.Figure(data=[go.Scatter(x=[0], y=[0], name="Error")], layout=go.Layout(title="Error in Combined Chart"))
 
-    # Display charts
-    st.header("Combined Charts")
-    st.plotly_chart(combined_fig, use_container_width=True, config={'scrollZoom': True}, key="combined_chart")
+# Auto-refresh for real-time updates
+if st.session_state.websocket_running:
+    st.experimental_rerun()
 
-    # Note on stored data
-    st.write("Note: Heikin Ashi data is precomputed and stored in DataCalculationAgent.")
+st.write("Note: Real-time updates are enabled when WebSocket is active. Disable to stop auto-refresh.")
